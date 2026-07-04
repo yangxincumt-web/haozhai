@@ -11,14 +11,19 @@
     <title>好宅助手</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
+      html, body {
         background: #f8f6f1;
         color: #1a1a1a;
         font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
         min-height: 100vh;
+        min-height: 100dvh;
         overflow-x: hidden;
+        -webkit-text-size-adjust: 100%;
       }
-      #root { min-height: 100vh; }
+      #root {
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
     </style>
     <script type="module" src="/src/main.jsx"></script>
   </head>
