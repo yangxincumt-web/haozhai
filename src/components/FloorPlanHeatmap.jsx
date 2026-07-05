@@ -757,90 +757,91 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
 
           <div className="floorplan-wrapper">
             {floorPlanData?.preview && (
-              <>
-                <img
-                  ref={resultImgRef}
-                  src={floorPlanData.preview}
-                  alt="户型图"
-                  className="floorplan-preview-img"
-                />
-
-                {/* 九宫格叠加层 - V2.9.15: 在 wrapper 内，相对于图片定位 */}
-                <div
-                  className="nine-palace-overlay"
-                  style={gridOverlayStyle}
-                >
-            {gridOrder.map((row, ri) => (
-              <div key={ri} className="palace-row">
-                {row.map(palace => {
-                  const data = palaceMap[palace] || {}
-                  const bgColor = getNatureColor(data.heatValue || 0.5, viewMode)
-                  const tagClass = getNatureTagClass(data.heatValue || 0.5)
-                  const isCenter = palace === '中'
-
-                  return (
-                    <div
-                      key={palace}
-                      className={`palace-cell ${isCenter ? 'center-cell' : ''} ${tagClass}`}
-                      style={{ backgroundColor: bgColor }}
-                    >
-                      {!isCenter && (
-                        <span className="palace-number">{data.number}</span>
-                      )}
-
-                      {data.room && (
-                        <div className="palace-room-name">{data.room}</div>
-                      )}
-
-                      <div className="palace-direction">
-                        {!isCenter && <span className="palace-trigram">{palace}</span>}
-                        <span className="palace-dir-text">{data.direction}</span>
-                      </div>
-
-                      {viewMode === 'bazhai' && data.info?.starName && (
-                        <div className={`palace-star-info ${tagClass}`}>
-                          <span className="star-name">{data.info.starName}</span>
-                          <span className="star-nature">{data.info.nature}</span>
-                        </div>
-                      )}
-
-                      {viewMode === 'feixing' && data.info?.shanStar != null && (
-                        <div className={`palace-star-info ${tagClass}`}>
-                          <div className="feixing-stars">
-                            <span className="shan-star">{data.info.shanStar}</span>
-                            <span className="star-sep">·</span>
-                            <span className="xiang-star">{data.info.xiangStar}</span>
-                          </div>
-                          <div className="feixing-keyword">
-                            {data.info.shanStarKeyword}
-                          </div>
-                        </div>
-                      )}
-
-                      {viewMode === 'fusion' && data.info && !isCenter && (
-                        <div className={`palace-fusion-badge ${data.heatValue >= 0.6 ? 'good' : data.heatValue < 0.4 ? 'bad' : data.info.consensus === false ? 'conflict' : 'neutral'}`}>
-                          {!data.info.consensus && data.info.tag?.includes('分歧') ? '⚡' : data.heatValue >= 0.6 ? '吉' : data.heatValue < 0.4 ? '凶' : '平'}
-                        </div>
-                      )}
-
-                      {viewMode !== 'fusion' && data.info?.tag && (
-                        <div className={`palace-opt-tag ${tagClass}`}>
-                          {data.info.tag}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
+              <img
+                ref={resultImgRef}
+                src={floorPlanData.preview}
+                alt="户型图"
+                className="floorplan-preview-img"
+              />
+            )}
           </div>
-          </>
-        )}
+
+          {/* V2.9.16: 九宫格叠加层 - 移回grid-container的直接子元素，和调整页布局一致 */}
+          {floorPlanData?.preview && (
+            <div
+              className="nine-palace-overlay"
+              style={gridOverlayStyle}
+            >
+              {gridOrder.map((row, ri) => (
+                <div key={ri} className="palace-row">
+                  {row.map(palace => {
+                    const data = palaceMap[palace] || {}
+                    const bgColor = getNatureColor(data.heatValue || 0.5, viewMode)
+                    const tagClass = getNatureTagClass(data.heatValue || 0.5)
+                    const isCenter = palace === '中'
+
+                    return (
+                      <div
+                        key={palace}
+                        className={`palace-cell ${isCenter ? 'center-cell' : ''} ${tagClass}`}
+                        style={{ backgroundColor: bgColor }}
+                      >
+                        {!isCenter && (
+                          <span className="palace-number">{data.number}</span>
+                        )}
+
+                        {data.room && (
+                          <div className="palace-room-name">{data.room}</div>
+                        )}
+
+                        <div className="palace-direction">
+                          {!isCenter && <span className="palace-trigram">{palace}</span>}
+                          <span className="palace-dir-text">{data.direction}</span>
+                        </div>
+
+                        {viewMode === 'bazhai' && data.info?.starName && (
+                          <div className={`palace-star-info ${tagClass}`}>
+                            <span className="star-name">{data.info.starName}</span>
+                            <span className="star-nature">{data.info.nature}</span>
+                          </div>
+                        )}
+
+                        {viewMode === 'feixing' && data.info?.shanStar != null && (
+                          <div className={`palace-star-info ${tagClass}`}>
+                            <div className="feixing-stars">
+                              <span className="shan-star">{data.info.shanStar}</span>
+                              <span className="star-sep">·</span>
+                              <span className="xiang-star">{data.info.xiangStar}</span>
+                            </div>
+                            <div className="feixing-keyword">
+                              {data.info.shanStarKeyword}
+                            </div>
+                          </div>
+                        )}
+
+                        {viewMode === 'fusion' && data.info && !isCenter && (
+                          <div className={`palace-fusion-badge ${data.heatValue >= 0.6 ? 'good' : data.heatValue < 0.4 ? 'bad' : data.info.consensus === false ? 'conflict' : 'neutral'}`}>
+                            {!data.info.consensus && data.info.tag?.includes('分歧') ? '⚡' : data.heatValue >= 0.6 ? '吉' : data.heatValue < 0.4 ? '凶' : '平'}
+                          </div>
+                        )}
+
+                        {viewMode !== 'fusion' && data.info?.tag && (
+                          <div className={`palace-opt-tag ${tagClass}`}>
+                            {data.info.tag}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+
         </div>
 
-          {/* V2.9.4: spacer占位，撑高容器使朝向栏不被九宫格遮挡 */}
-          {spacerHeight > 0 && <div style={{ height: spacerHeight }} />}
-        </div>
+        {/* V2.9.16: spacer移到容器外，避免被aspect-ratio:1约束 */}
+        {spacerHeight > 0 && <div style={{ height: spacerHeight }} />}
       </div>
 
       {/* 方向提示条 */}

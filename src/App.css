@@ -2852,20 +2852,13 @@
   background: #f5f0e6;
   max-width: 420px;
   margin: 0 auto;
+  /* V2.9.16: 复用调整页的正方形布局，确保图片渲染尺寸一致 */
+  aspect-ratio: 1;
 }
 
-/* V2.9.7: 报告页图片撑高容器，不再用 absolute */
-.floorplan-grid-container .floorplan-wrapper {
-  position: relative;
-  inset: auto;
-  display: block;
-}
-
+/* V2.9.16: 不再覆盖全局wrapper样式，保持 position:absolute;inset:0;flex居中 */
 .floorplan-grid-container .floorplan-preview-img {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: none;
+  /* 使用全局 .floorplan-preview-img 的 object-fit: contain */
 }
 
 .floorplan-base-img {
