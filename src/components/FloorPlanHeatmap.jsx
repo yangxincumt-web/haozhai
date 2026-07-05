@@ -311,34 +311,42 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
   const resultImgRef = useRef(null)
   const [spacerHeight, setSpacerHeight] = useState(0)
   const [imgRenderedSize, setImgRenderedSize] = useState({ width: 0, height: 0 })
+  const [imgOffsetInContainer, setImgOffsetInContainer] = useState({ x: 0, y: 0 })
 
-  // 用 ResizeObserver 测量结果页图片实际渲染尺寸（比 load 事件更可靠）
+  // 用 ResizeObserver 测量结果页图片实际渲染尺寸 + 图片在容器内的偏移
   useEffect(() => {
     const img = resultImgRef.current
-    if (!img) return
+    const container = gridContainerRef.current
+    if (!img || !container) return
 
-    const updateSize = () => {
-      const rect = img.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) {
+    const updateMeasurements = () => {
+      const imgRect = img.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+      if (imgRect.width > 0 && imgRect.height > 0) {
         setImgRenderedSize(prev => {
-          if (Math.abs(prev.width - rect.width) < 1 && Math.abs(prev.height - rect.height) < 1) return prev
-          return { width: rect.width, height: rect.height }
+          if (Math.abs(prev.width - imgRect.width) < 1 && Math.abs(prev.height - imgRect.height) < 1) return prev
+          return { width: imgRect.width, height: imgRect.height }
+        })
+        setImgOffsetInContainer({
+          x: imgRect.left - containerRect.left,
+          y: imgRect.top - containerRect.top,
         })
       }
     }
 
     // 立即测量一次（处理缓存图片）
     if (img.complete && img.naturalWidth > 0) {
-      updateSize()
+      updateMeasurements()
     }
 
     // 图片加载完成后测量
-    const onLoad = () => { requestAnimationFrame(updateSize) }
+    const onLoad = () => { requestAnimationFrame(updateMeasurements) }
     img.addEventListener('load', onLoad)
 
-    // ResizeObserver 监听尺寸变化
-    const ro = new ResizeObserver(() => { requestAnimationFrame(updateSize) })
+    // 同时监听图片和容器的尺寸变化
+    const ro = new ResizeObserver(() => { requestAnimationFrame(updateMeasurements) })
     ro.observe(img)
+    ro.observe(container)
 
     return () => {
       img.removeEventListener('load', onLoad)
@@ -346,29 +354,18 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
     }
   }, [floorPlanData?.preview])
 
-  // V2.9.17: 修复根因——overlay定位在容器坐标系，但gridBoundsPct是相对于图片的
+  // V2.9.17: overlay定位在容器坐标系，gridBoundsPct是相对于图片的
   // 图片通过object-fit:contain居中在正方形容器内，存在偏移量
-  // 必须加上图片在容器内的偏移，否则九宫格会与图片错位
+  // 必须加上图片在容器内的偏移（通过ResizeObserver测量，不依赖render时getBoundingClientRect）
   const gridOverlayStyle = useMemo(() => {
     const gb = adjustedData?.gridBoundsPct
     if (!gb || imgRenderedSize.width === 0) {
       return { display: 'none' }
     }
 
-    // 获取图片在容器内的实际位置偏移
-    const imgEl = resultImgRef.current
-    const containerEl = gridContainerRef.current
-    let imgOffsetX = 0, imgOffsetY = 0
-    if (imgEl && containerEl) {
-      const imgRect = imgEl.getBoundingClientRect()
-      const containerRect = containerEl.getBoundingClientRect()
-      imgOffsetX = imgRect.left - containerRect.left
-      imgOffsetY = imgRect.top - containerRect.top
-    }
-
     // 图片内百分比 → 容器内像素值 = 图片偏移 + 图片内像素值
-    const left = imgOffsetX + (gb.left / 100) * imgRenderedSize.width
-    const top = imgOffsetY + (gb.top / 100) * imgRenderedSize.height
+    const left = imgOffsetInContainer.x + (gb.left / 100) * imgRenderedSize.width
+    const top = imgOffsetInContainer.y + (gb.top / 100) * imgRenderedSize.height
     const width = (gb.width / 100) * imgRenderedSize.width
     const height = (gb.height / 100) * imgRenderedSize.height
 
@@ -380,7 +377,7 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
       transform: `translate(${adjustedData?.gridOffsetPctX || 0}%, ${adjustedData?.gridOffsetPctY || 0}%) scale(${adjustedData?.gridScaleX || 1}, ${adjustedData?.gridScaleY || 1}) rotate(${adjustedData?.gridAngle || 0}deg)`,
       transformOrigin: '50% 50%',
     }
-  }, [adjustedData, imgRenderedSize])
+  }, [adjustedData, imgRenderedSize, imgOffsetInContainer])
 
   // V2.9.14: 用图片实际渲染尺寸计算九宫格底部溢出量
   useEffect(() => {
