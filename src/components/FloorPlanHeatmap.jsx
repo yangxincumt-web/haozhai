@@ -346,17 +346,29 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
     }
   }, [floorPlanData?.preview])
 
-  // V2.9.14: 用像素值定位九宫格 overlay，参考系为图片实际渲染尺寸
-  // 不再依赖 imageBoundsPct 百分比转换，避免调整页/结果页布局差异导致错位
+  // V2.9.17: 修复根因——overlay定位在容器坐标系，但gridBoundsPct是相对于图片的
+  // 图片通过object-fit:contain居中在正方形容器内，存在偏移量
+  // 必须加上图片在容器内的偏移，否则九宫格会与图片错位
   const gridOverlayStyle = useMemo(() => {
     const gb = adjustedData?.gridBoundsPct
     if (!gb || imgRenderedSize.width === 0) {
       return { display: 'none' }
     }
 
-    // gridBoundsPct 是相对于图片的百分比，直接映射到图片渲染像素
-    const left = (gb.left / 100) * imgRenderedSize.width
-    const top = (gb.top / 100) * imgRenderedSize.height
+    // 获取图片在容器内的实际位置偏移
+    const imgEl = resultImgRef.current
+    const containerEl = gridContainerRef.current
+    let imgOffsetX = 0, imgOffsetY = 0
+    if (imgEl && containerEl) {
+      const imgRect = imgEl.getBoundingClientRect()
+      const containerRect = containerEl.getBoundingClientRect()
+      imgOffsetX = imgRect.left - containerRect.left
+      imgOffsetY = imgRect.top - containerRect.top
+    }
+
+    // 图片内百分比 → 容器内像素值 = 图片偏移 + 图片内像素值
+    const left = imgOffsetX + (gb.left / 100) * imgRenderedSize.width
+    const top = imgOffsetY + (gb.top / 100) * imgRenderedSize.height
     const width = (gb.width / 100) * imgRenderedSize.width
     const height = (gb.height / 100) * imgRenderedSize.height
 
