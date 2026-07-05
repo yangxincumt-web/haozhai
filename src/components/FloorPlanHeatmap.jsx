@@ -312,24 +312,37 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
   const [spacerHeight, setSpacerHeight] = useState(0)
   const [imgRenderedSize, setImgRenderedSize] = useState({ width: 0, height: 0 })
 
-  // 测量结果页图片实际渲染尺寸
+  // 用 ResizeObserver 测量结果页图片实际渲染尺寸（比 load 事件更可靠）
   useEffect(() => {
-    const measureImg = () => {
-      const img = resultImgRef.current
-      if (img && img.complete && img.naturalWidth > 0) {
-        const rect = img.getBoundingClientRect()
-        if (rect.width > 0 && rect.height > 0) {
-          setImgRenderedSize({ width: rect.width, height: rect.height })
-        }
+    const img = resultImgRef.current
+    if (!img) return
+
+    const updateSize = () => {
+      const rect = img.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setImgRenderedSize(prev => {
+          if (Math.abs(prev.width - rect.width) < 1 && Math.abs(prev.height - rect.height) < 1) return prev
+          return { width: rect.width, height: rect.height }
+        })
       }
     }
-    measureImg()
-    const img = resultImgRef.current
-    img?.addEventListener('load', measureImg)
-    window.addEventListener('resize', measureImg)
+
+    // 立即测量一次（处理缓存图片）
+    if (img.complete && img.naturalWidth > 0) {
+      updateSize()
+    }
+
+    // 图片加载完成后测量
+    const onLoad = () => { requestAnimationFrame(updateSize) }
+    img.addEventListener('load', onLoad)
+
+    // ResizeObserver 监听尺寸变化
+    const ro = new ResizeObserver(() => { requestAnimationFrame(updateSize) })
+    ro.observe(img)
+
     return () => {
-      img?.removeEventListener('load', measureImg)
-      window.removeEventListener('resize', measureImg)
+      img.removeEventListener('load', onLoad)
+      ro.disconnect()
     }
   }, [floorPlanData?.preview])
 
@@ -744,20 +757,19 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
 
           <div className="floorplan-wrapper">
             {floorPlanData?.preview && (
-              <img
-                ref={resultImgRef}
-                src={floorPlanData.preview}
-                alt="户型图"
-                className="floorplan-preview-img"
-              />
-            )}
-          </div>
+              <>
+                <img
+                  ref={resultImgRef}
+                  src={floorPlanData.preview}
+                  alt="户型图"
+                  className="floorplan-preview-img"
+                />
 
-          {/* 九宫格叠加层 - V2.9.14: 用像素值定位，参考系为图片实际渲染尺寸 */}
-          <div
-            className="nine-palace-overlay"
-            style={gridOverlayStyle}
-          >
+                {/* 九宫格叠加层 - V2.9.15: 在 wrapper 内，相对于图片定位 */}
+                <div
+                  className="nine-palace-overlay"
+                  style={gridOverlayStyle}
+                >
             {gridOrder.map((row, ri) => (
               <div key={ri} className="palace-row">
                 {row.map(palace => {
@@ -822,6 +834,9 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
               </div>
             ))}
           </div>
+          </>
+        )}
+        </div>
 
           {/* V2.9.4: spacer占位，撑高容器使朝向栏不被九宫格遮挡 */}
           {spacerHeight > 0 && <div style={{ height: spacerHeight }} />}
