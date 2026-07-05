@@ -74,8 +74,11 @@ export default function FloorPlanUpload({ onUploadComplete, onBack, magneticHead
         // 第2/3层：AI验证 + 降级启发式
         const result = await validateAndExtract(preview, undefined, img)
         setValidationResult(result)
+        console.log('[V2.9.12] AI验证完成, isValid:', result.isValid, 'rooms:', result.rooms?.length)
 
         if (result.isValid) {
+          console.log('[V2.9.12] >>> 进入九宫格调整页 adjusting')
+          setAdjustedData(null) // 清除上一次的调整数据，确保重新进入调整页
           setUploadState('adjusting')
         } else {
           setUploadState('error')
@@ -144,38 +147,36 @@ export default function FloorPlanUpload({ onUploadComplete, onBack, magneticHead
     }
   }
 
-  // 处理九宫格调整完成 → V2.8: 用裁剪后的截图让AI视觉识别房间宫位
+  // 处理九宫格调整完成 → V2.9.11: 升级模型+提高合成图分辨率
   const handleAdjustComplete = useCallback(async (adjustment) => {
     setAdjustedData(adjustment)
     
     const screenshot = adjustment.croppedScreenshot
     if (!screenshot) {
-      console.warn('[V2.8] 无截图，无法AI识别宫位')
+      console.warn('[V2.9.11] 无截图，无法AI识别宫位')
       setUploadState('done')
       return
     }
     
-    // 进入AI分析状态
     setUploadState('analyzing')
     setReanalyzing(true)
     setReanalyzeError('')
     
     try {
       const originalRooms = validationResult?.rooms || []
-      const updatedRooms = await reanalyzeWithGrid(null, { croppedScreenshot: screenshot }, originalRooms)
+      const updatedRooms = await reanalyzeWithGrid(null, { croppedScreenshot: screenshot, gridOrder: adjustment.gridOrder }, originalRooms)
       
       if (updatedRooms && updatedRooms.length > 0) {
-        // 用AI视觉识别结果更新validationResult中的rooms
         setValidationResult(prev => ({
           ...prev,
           rooms: updatedRooms,
         }))
-        console.log('[V2.8] AI视觉识别完成:', updatedRooms.map(r => `${r.name}→${r.palace}`).join(', '))
+        console.log('[V2.9.11] AI视觉识别完成:', updatedRooms.map(r => `${r.name}→${r.palace}`).join(', '))
       } else {
         setReanalyzeError('AI未能识别房间宫位，请重试')
       }
     } catch (err) {
-      console.error('[V2.8] AI识别失败:', err)
+      console.error('[V2.9.11] AI识别失败:', err)
       setReanalyzeError('AI识别失败: ' + (err.message || '请重试'))
     }
     

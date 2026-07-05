@@ -2,7 +2,7 @@
  * 好宅助手 - 户型风水专业分析报告卡片
  * V1.7: 方向对齐 + 户型适配评分 + 布局优化
  */
-import React, { useState, useRef, useMemo, useCallback } from 'react'
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { scoreToHeatValue, DIRECTION_TO_PALACE } from '../utils/heatmapRenderer.js'
 import { NINE_STARS } from '../algorithms/feixing.js'
 import {
@@ -248,18 +248,18 @@ function getFeiXingTip(comboScore) {
 // ===== 吉凶等级→背景色 =====
 function getNatureColor(score, mode) {
   if (mode === 'bazhai') {
-    if (score >= 0.8) return 'rgba(45, 106, 45, 0.45)'
-    if (score >= 0.6) return 'rgba(45, 106, 45, 0.3)'
-    if (score >= 0.5) return 'rgba(139, 115, 85, 0.25)'
-    if (score >= 0.3) return 'rgba(180, 50, 50, 0.3)'
-    return 'rgba(180, 50, 50, 0.45)'
+    if (score >= 0.8) return 'rgba(45, 106, 45, 0.55)'
+    if (score >= 0.6) return 'rgba(45, 106, 45, 0.40)'
+    if (score >= 0.5) return 'rgba(139, 115, 85, 0.30)'
+    if (score >= 0.3) return 'rgba(180, 50, 50, 0.40)'
+    return 'rgba(180, 50, 50, 0.55)'
   }
   // feixing 和 fusion 统一色阶
-  if (score >= 0.75) return 'rgba(45, 106, 45, 0.45)'
-  if (score >= 0.6) return 'rgba(45, 106, 45, 0.3)'
-  if (score >= 0.45) return 'rgba(139, 115, 85, 0.25)'
-  if (score >= 0.3) return 'rgba(180, 50, 50, 0.3)'
-  return 'rgba(180, 50, 50, 0.45)'
+  if (score >= 0.75) return 'rgba(45, 106, 45, 0.55)'
+  if (score >= 0.6) return 'rgba(45, 106, 45, 0.40)'
+  if (score >= 0.45) return 'rgba(139, 115, 85, 0.30)'
+  if (score >= 0.3) return 'rgba(180, 50, 50, 0.40)'
+  return 'rgba(180, 50, 50, 0.55)'
 }
 
 function getNatureTagClass(score) {
@@ -282,25 +282,134 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
   
   // 获取用户调整后的参数
   const adjustedData = floorPlanData?.adjustedData || {}
-  const clickedSide = adjustedData.clickedSide || null
   
-  // 九宫格上方朝向
-  // 优先使用用户在调整页面选择的方向，其次用AI识别值
-  const aiDetectedTopDir = floorPlanData?.floorPlanInfo?.imageTopDirection || null
-  const userSelectedDir = adjustedData?.gridTopDirection || null
-  const [floorPlanTopDir, setFloorPlanTopDir] = useState(() => {
-    return userSelectedDir || aiDetectedTopDir || '北'
-  })
-  const [showDirPicker, setShowDirPicker] = useState(false)
+  // 朝向计算：罗盘角度 + 第二步选定的朝向面 → 图片上方朝向（结果页不可修改）
+  const SIDE_TO_DEFAULT_ANGLE = { 'top': 0, 'right': 90, 'bottom': 180, 'left': 270 }
+  
+  const storedMagHeading = adjustedData?.magneticHeading || 0
+  const storedClickedSide = adjustedData?.clickedSide || 'top'
+  
+  // 根据罗盘角度+朝向面，推导图片上方朝向（固定值，不允许修改）
+  const floorPlanTopDir = useMemo(() => {
+    if (!storedClickedSide || !storedMagHeading) return adjustedData?.gridTopDirection || '北'
+    const defaultAngle = SIDE_TO_DEFAULT_ANGLE[storedClickedSide] || 0
+    let offset = storedMagHeading - defaultAngle
+    while (offset > 180) offset -= 360
+    while (offset < -180) offset += 360
+    const a = ((offset % 360) + 360) % 360
+    if (a >= 337.5 || a < 22.5) return '北'
+    if (a >= 22.5 && a < 67.5) return '东北'
+    if (a >= 67.5 && a < 112.5) return '东'
+    if (a >= 112.5 && a < 157.5) return '东南'
+    if (a >= 157.5 && a < 202.5) return '南'
+    if (a >= 202.5 && a < 247.5) return '西南'
+    if (a >= 247.5 && a < 292.5) return '西'
+    return '西北'
+  }, [storedClickedSide, storedMagHeading])
   const reportRef = useRef(null)
+  const gridContainerRef = useRef(null)
+  const resultImgRef = useRef(null)
+  const [spacerHeight, setSpacerHeight] = useState(0)
+  const [imgRenderedSize, setImgRenderedSize] = useState({ width: 0, height: 0 })
 
-  // 监听用户选择或AI识别数据变化
-  React.useEffect(() => {
-    const preferred = userSelectedDir || aiDetectedTopDir
-    if (preferred) {
-      setFloorPlanTopDir(preferred)
+  // 测量结果页图片实际渲染尺寸
+  useEffect(() => {
+    const measureImg = () => {
+      const img = resultImgRef.current
+      if (img && img.complete && img.naturalWidth > 0) {
+        const rect = img.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0) {
+          setImgRenderedSize({ width: rect.width, height: rect.height })
+        }
+      }
     }
-  }, [userSelectedDir, aiDetectedTopDir])
+    measureImg()
+    const img = resultImgRef.current
+    img?.addEventListener('load', measureImg)
+    window.addEventListener('resize', measureImg)
+    return () => {
+      img?.removeEventListener('load', measureImg)
+      window.removeEventListener('resize', measureImg)
+    }
+  }, [floorPlanData?.preview])
+
+  // V2.9.14: 用像素值定位九宫格 overlay，参考系为图片实际渲染尺寸
+  // 不再依赖 imageBoundsPct 百分比转换，避免调整页/结果页布局差异导致错位
+  const gridOverlayStyle = useMemo(() => {
+    const gb = adjustedData?.gridBoundsPct
+    if (!gb || imgRenderedSize.width === 0) {
+      return { display: 'none' }
+    }
+
+    // gridBoundsPct 是相对于图片的百分比，直接映射到图片渲染像素
+    const left = (gb.left / 100) * imgRenderedSize.width
+    const top = (gb.top / 100) * imgRenderedSize.height
+    const width = (gb.width / 100) * imgRenderedSize.width
+    const height = (gb.height / 100) * imgRenderedSize.height
+
+    return {
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${width}px`,
+      height: `${height}px`,
+      transform: `translate(${adjustedData?.gridOffsetPctX || 0}%, ${adjustedData?.gridOffsetPctY || 0}%) scale(${adjustedData?.gridScaleX || 1}, ${adjustedData?.gridScaleY || 1}) rotate(${adjustedData?.gridAngle || 0}deg)`,
+      transformOrigin: '50% 50%',
+    }
+  }, [adjustedData, imgRenderedSize])
+
+  // V2.9.14: 用图片实际渲染尺寸计算九宫格底部溢出量
+  useEffect(() => {
+    if (!adjustedData?.gridBoundsPct || imgRenderedSize.width === 0) {
+      setSpacerHeight(0)
+      return
+    }
+
+    const gb = adjustedData.gridBoundsPct
+    const scaleX = adjustedData?.gridScaleX || 1
+    const scaleY = adjustedData?.gridScaleY || 1
+    const offX = (adjustedData?.gridOffsetPctX || 0) / 100
+    const offY = (adjustedData?.gridOffsetPctY || 0) / 100
+    const angle = (adjustedData?.gridAngle || 0) * Math.PI / 180
+
+    // 九宫格在图片像素空间中的位置和尺寸
+    const gridTop = (gb.top / 100) * imgRenderedSize.height
+    const gridLeft = (gb.left / 100) * imgRenderedSize.width
+    const gridW = (gb.width / 100) * imgRenderedSize.width
+    const gridH = (gb.height / 100) * imgRenderedSize.height
+    const cx = gridLeft + gridW / 2
+    const cy = gridTop + gridH / 2
+
+    // 四角经 transform 后的最大底部 y
+    const corners = [
+      { x: gridLeft, y: gridTop },
+      { x: gridLeft + gridW, y: gridTop },
+      { x: gridLeft, y: gridTop + gridH },
+      { x: gridLeft + gridW, y: gridTop + gridH },
+    ]
+
+    let maxBottom = 0
+    corners.forEach(c => {
+      let x = cx + (c.x - cx) * scaleX
+      let y = cy + (c.y - cy) * scaleY
+      x += offX * gridW * scaleX
+      y += offY * gridH * scaleY
+      if (angle) {
+        const dx = x - cx, dy = y - cy
+        const cosA = Math.cos(angle), sinA = Math.sin(angle)
+        x = cx + dx * cosA - dy * sinA
+        y = cy + dx * sinA + dy * cosA
+      }
+      maxBottom = Math.max(maxBottom, y)
+    })
+
+    // spacer高度 = 网格视觉底部 - 图片渲染高度 + 缓冲
+    const overflow = Math.ceil(maxBottom - imgRenderedSize.height + 16)
+    setSpacerHeight(Math.max(overflow, 0))
+  }, [adjustedData?.gridBoundsPct, adjustedData?.gridScaleX, adjustedData?.gridScaleY,
+      adjustedData?.gridOffsetPctX, adjustedData?.gridOffsetPctY, adjustedData?.gridAngle,
+      imgRenderedSize])
+
+  // floorPlanTopDir 现在由 useMemo 自动计算，不再需要 useEffect
   
   // 根据朝向生成九宫格布局（考虑自动校准偏移量）
   const gridOrder = useMemo(() => {
@@ -626,41 +735,17 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
         </button>
       </div>
 
-      {/* ===== 方向选择器 ===== */}
-      <div className="dir-selector-section">
-        <div className="dir-selector-header" onClick={() => setShowDirPicker(!showDirPicker)}>
-          <span className="dir-label">📐 户型图上方朝向</span>
-          <span className="dir-current">{floorPlanTopDir}方 ▾</span>
-        </div>
-        {showDirPicker && (
-          <div className="dir-picker-grid">
-            {COMPASS_ORDER.map(dir => (
-              <button
-                key={dir}
-                className={`dir-pick-btn ${floorPlanTopDir === dir ? 'active' : ''}`}
-                onClick={() => { setFloorPlanTopDir(dir); setShowDirPicker(false) }}
-              >
-                {dir}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* ===== 户型图 + 九宫格叠加 ===== */}
       <div className="report-floorplan-section">
-        <div className={`floorplan-grid-container ${!floorPlanData?.preview ? 'no-image' : ''}`}>
-          {/* 指北针 */}
-          <div className="compass-indicator">
-            <div className="compass-arrow" style={{ transform: `rotate(${COMPASS_ORDER.indexOf(floorPlanTopDir) * 45}deg)` }}>
-              <span className="compass-n">N</span>
-            </div>
-          </div>
+        <div
+          ref={gridContainerRef}
+          className={`floorplan-grid-container ${!floorPlanData?.preview ? 'no-image' : ''}`}
+        >
 
-          {/* V2.5: 用 floorplan-wrapper 包裹图片，与调整页定位方式一致，确保九宫格坐标系和图片一致 */}
           <div className="floorplan-wrapper">
             {floorPlanData?.preview && (
               <img
+                ref={resultImgRef}
                 src={floorPlanData.preview}
                 alt="户型图"
                 className="floorplan-preview-img"
@@ -668,28 +753,10 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
             )}
           </div>
 
-          {/* 九宫格叠加层 - V2.5.4: 用百分比定位，避免容器尺寸变化导致偏移 */}
+          {/* 九宫格叠加层 - V2.9.14: 用像素值定位，参考系为图片实际渲染尺寸 */}
           <div
             className="nine-palace-overlay"
-            style={{
-              // 优先用百分比值（跨容器尺寸自适应），后备用像素值
-              ...(adjustedData?.imageBoundsPct
-                ? {
-                    left: `${adjustedData.imageBoundsPct.left}%`,
-                    top: `${adjustedData.imageBoundsPct.top}%`,
-                    width: `${adjustedData.imageBoundsPct.width}%`,
-                    height: `${adjustedData.imageBoundsPct.height}%`,
-                  }
-                : {
-                    left: adjustedData?.imageBounds?.left ?? 0,
-                    top: adjustedData?.imageBounds?.top ?? 0,
-                    width: adjustedData?.imageBounds?.width ?? '100%',
-                    height: adjustedData?.imageBounds?.height ?? '100%',
-                  }),
-              // 缩放偏移也用百分比（相对于九宫格自身尺寸）
-              transform: `translate(${adjustedData?.gridOffsetPctX || 0}%, ${adjustedData?.gridOffsetPctY || 0}%) scale(${adjustedData?.gridScaleX || 1}, ${adjustedData?.gridScaleY || 1}) rotate(${adjustedData?.gridAngle || 0}deg)`,
-              transformOrigin: '50% 50%',
-            }}
+            style={gridOverlayStyle}
           >
             {gridOrder.map((row, ri) => (
               <div key={ri} className="palace-row">
@@ -755,17 +822,25 @@ export default function FloorPlanHeatmap({ floorPlanData, fengshuiResult, onBack
               </div>
             ))}
           </div>
-        </div>
 
-        {/* 图例 */}
-        <div className="report-legend">
-          <div className="legend-item"><span className="legend-dot good" />吉位</div>
-          <div className="legend-item"><span className="legend-dot neutral" />平位</div>
-          <div className="legend-item"><span className="legend-dot bad" />凶位</div>
-          {viewMode === 'fusion' && (
-            <div className="legend-item"><span className="legend-dot conflict" />分歧</div>
-          )}
+          {/* V2.9.4: spacer占位，撑高容器使朝向栏不被九宫格遮挡 */}
+          {spacerHeight > 0 && <div style={{ height: spacerHeight }} />}
         </div>
+      </div>
+
+      {/* 方向提示条 */}
+      <div className="dir-hint-bar">
+        朝向：<strong>{floorPlanTopDir}方</strong>
+      </div>
+
+      {/* 图例 */}
+      <div className="report-legend">
+        <div className="legend-item"><span className="legend-dot good" />吉位</div>
+        <div className="legend-item"><span className="legend-dot neutral" />平位</div>
+        <div className="legend-item"><span className="legend-dot bad" />凶位</div>
+        {viewMode === 'fusion' && (
+          <div className="legend-item"><span className="legend-dot conflict" />分歧</div>
+        )}
       </div>
 
       {/* ===== 融合分析详情（融合模式下显示） ===== */}

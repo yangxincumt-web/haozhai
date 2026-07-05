@@ -2847,9 +2847,25 @@
 .floorplan-grid-container {
   position: relative;
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   border: 2px solid rgba(139, 115, 85, 0.3);
   background: #f5f0e6;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+/* V2.9.7: 报告页图片撑高容器，不再用 absolute */
+.floorplan-grid-container .floorplan-wrapper {
+  position: relative;
+  inset: auto;
+  display: block;
+}
+
+.floorplan-grid-container .floorplan-preview-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: none;
 }
 
 .floorplan-base-img {
@@ -2865,6 +2881,8 @@
   /* V2.5.4: 不用inset:0，位置由JS百分比控制，避免与宽高冲突 */
   display: flex;
   flex-direction: column;
+  z-index: 5;
+  pointer-events: none;
 }
 
 .palace-row {
@@ -6363,6 +6381,102 @@
   color: var(--neon-purple);
 }
 
+/* ===== V2.9.12 合成图预览模态框 ===== */
+.composite-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.composite-preview-modal {
+  background: #fff;
+  border-radius: 16px;
+  max-width: 90vw;
+  max-height: 90vh;
+  width: 500px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease;
+}
+
+.composite-preview-header {
+  padding: 20px 20px 12px;
+  text-align: center;
+}
+
+.composite-preview-header h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #1a1a1a;
+}
+
+.composite-preview-hint {
+  font-size: 13px;
+  color: #888;
+  line-height: 1.5;
+}
+
+.composite-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  margin: 0 20px;
+  border-radius: 8px;
+  min-height: 300px;
+}
+
+.composite-preview-body img {
+  max-width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.composite-preview-error {
+  text-align: center;
+  color: #c0392b;
+  padding: 40px 20px;
+}
+
+.composite-preview-error p {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.composite-preview-actions {
+  display: flex;
+  gap: 12px;
+  padding: 16px 20px 20px;
+}
+
+.composite-preview-actions .btn-primary,
+.composite-preview-actions .btn-secondary {
+  flex: 1;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 /* ===== 户型图上传验证状态 ===== */
 .upload-validating-overlay {
   position: absolute;
@@ -7068,3 +7182,166 @@
   text-align: center;
   line-height: 1.3;
 }
+
+/* ===== 热力图-方向提示条 ===== */
+/* V2.9.8: 移到 report-floorplan-section 外部，自然排列在图片下方 */
+.dir-hint-bar {
+  background: rgba(255, 255, 255, 0.88);
+  padding: 6px 10px;
+  margin: 0 20px;
+  font-size: 11px;
+  color: #5a4a3a;
+  text-align: center;
+  border-top: 1px solid rgba(139, 115, 85, 0.2);
+  border-bottom: 1px solid rgba(139, 115, 85, 0.1);
+}
+
+/* ===== 边缘方向按钮 - 点击图片边缘选朝向 ===== */
+.edge-direction-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.edge-dir-btn {
+  position: absolute;
+  pointer-events: auto;
+  background: rgba(255,255,255,0.88);
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #555;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+
+.edge-dir-btn:hover {
+  background: rgba(240,235,225,0.95);
+}
+
+.edge-dir-btn.edge-active {
+  background: rgba(45,106,45,0.92);
+  color: white;
+  border-color: rgba(45,106,45,0.8);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(45,106,45,0.35);
+}
+
+.edge-arrow {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.edge-dir-top {
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.edge-dir-bottom {
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.edge-dir-left {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.edge-dir-right {
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ===== V2.4.2 朝向选择样式 ===== */
+.direction-guide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: rgba(166, 124, 61, 0.1);
+  border: 1px solid rgba(166, 124, 61, 0.2);
+  border-radius: 10px;
+}
+.guide-icon { font-size: 18px; }
+.guide-text { font-size: 14px; color: #333; font-weight: 500; }
+
+.side-highlight {
+  position: absolute;
+  background: rgba(166, 124, 61, 0.15);
+  border: 2px dashed rgba(166, 124, 61, 0.5);
+  transition: all 0.2s;
+  z-index: 18;
+  cursor: pointer;
+}
+.side-highlight:hover, .side-highlight.hovered {
+  background: rgba(166, 124, 61, 0.35);
+  border-style: solid;
+}
+.side-tooltip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.side-center-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 19;
+}
+.side-center-hint .hint-icon { font-size: 28px; }
+.side-center-hint .hint-text { font-size: 13px; color: #666; font-weight: 500; }
+
+.facing-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(26, 154, 85, 0.9);
+  border-radius: 20px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+  z-index: 15;
+  animation: fadeIn 0.3s ease-out;
+}
+.facing-label-arrow { font-size: 16px; color: #fff; font-weight: 700; }
+.facing-label-text { font-size: 13px; color: #fff; font-weight: 500; }
+
+.btn-reclick {
+  padding: 4px 12px;
+  border: 1px solid #1a9a55;
+  border-radius: 6px;
+  background: rgba(26, 154, 85, 0.1);
+  color: #1a9a55;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-reclick:hover { background: rgba(26, 154, 85, 0.2); }

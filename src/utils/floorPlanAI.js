@@ -60,10 +60,13 @@ const EXTRACT_PROMPT = `你是一个专业的建筑户型图分析专家。请�
 请严格按以下JSON格式返回（不要返回其他内容）：
 {
   "imageTopDirection": "北",
+  "mainOrientation": "南",
+  "floorPlanType": "三室两厅",
+  "totalArea": 98.6,
   "floorPlanBody": {
     "left": 0.05,
     "top": 0.05,
-    "right": 0.95,
+    "right": 0.85,
     "bottom": 0.75
   },
   "rooms": [
@@ -75,16 +78,15 @@ const EXTRACT_PROMPT = `你是一个专业的建筑户型图分析专家。请�
       "width": 0.25,
       "height": 0.3
     }
-  ],
-  "totalArea": 98.6,
-  "mainOrientation": "南",
-  "floorPlanType": "三室两厅"
+  ]
 }
 
 说明：
-- imageTopDirection: 图片上方代表的罗盘方向，必须是以下之一：北、东北、东、东南、南、西南、西、西北
-- floorPlanBody: 主户型体的边界（不含阳台、外部走廊等非主结构区域），用0-1的归一化坐标表示。left/top/right/bottom分别是主户型体左/上/右/下边缘在图片中的位置。这个值非常重要，九宫格将覆盖这个区域！
-- mainOrientation: 房屋的主要朝向（即阳台/主窗面向的方向）
+- imageTopDirection: 图片上方代表的罗盘方向
+- mainOrientation: 房屋主要朝向（阳台/主窗面向的方向）
+- floorPlanType: 户型类型
+- totalArea: 总面积
+- 【必填】floorPlanBody: 主户型体边界（不含阳台！）。观察户型图，找到主结构（卧室/客厅/厨房/卫生间/餐厅等）的外轮廓边界，用归一化坐标表示。阳台通常凸出在主结构之外，不要包含在floorPlanBody中！
 
 【房间识别注意事项】
 - 严格按图上文字标注识别房间名称，图上写"客厅"就是客厅，写"厨房"就是厨房
@@ -97,7 +99,7 @@ const EXTRACT_PROMPT = `你是一个专业的建筑户型图分析专家。请�
  */
 async function callQwenVL(imageBase64, prompt, apiKey) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000) // 30秒超时
+  const timeout = setTimeout(() => controller.abort(), 60000) // 60秒超时（qwen-vl-max可能更慢）
 
   try {
     const response = await fetch(DASHSCOPE_API, {
@@ -116,7 +118,7 @@ async function callQwenVL(imageBase64, prompt, apiKey) {
           ]
         }],
         temperature: 0.1,
-        max_tokens: 1024
+        max_tokens: 2048
       }),
       signal: controller.signal
     })
@@ -386,42 +388,30 @@ export async function reanalyzeWithGrid(imageBase64, gridConfig, originalRooms) 
 
   const REANALYZE_PROMPT = `你是一个专业的建筑户型图分析专家。
 
-这张图片显示了一个户型图，上面叠加了九宫格网格。每个格子中标注了宫位名称（坎、艮、震、巽、离、坤、兑、乾）和方位（北、东北、东、东南、南、西南、西、西北），中央标注"中宫"。
+这张图片是户型图与九宫格网格的叠加图。每个格子的**左上角**有一个白色标签，标签上显示了大号数字编号（1-9）。
 
 【你的任务】
-仔细观察图片，识别每个房间，根据九宫格标签判断每个房间属于哪个宫位。
+仔细观察图片，识别每个房间，判断每个房间**主体区域**位于哪个编号的格子内。
 
-【重要限制——只分析九宫格内的房间！】
-- 只识别位于九宫格网格覆盖范围内的房间
-- 九宫格外的区域（如阳台、走廊、外部空间）完全忽略，不要识别和返回
-- 如果一个房间横跨九宫格内外，只记录它在九宫格内的部分对应的宫位
-
-【识别规则——极其重要！】
-1. 逐个区域仔细辨认图上的文字标注，严格按图上写的名称来
-2. 客厅和厨房是完全不同的房间！"客厅"就是客厅，"厨房"就是厨房，绝不能混淆
-3. 餐厅和厨房也是不同的房间
-4. 主卧、次卧、卧室都要分别识别
-5. 如果图上某个区域没写文字但可以看到房间轮廓，根据家具/设施推断（有灶台=厨房，有沙发=客厅，有床=卧室，有马桶=卫生间，有餐桌=餐厅）
-
-【宫位判断规则】
-- 房间的中心在哪个宫位格子内，它就属于那个宫位
-- 如果一个房间横跨两个宫位，中心点所在的宫位是palace，其他覆盖的是secondaryPalaces
-- 每个房间单独一条记录，不要把多个房间合并
+【识别规则】
+1. 仔细辨认图上原始标注的房间名称（如"主卧""客厅""厨房""卫生间""次卧""书房""餐厅""阳台"等），严格按图上写的名称来
+2. 看房间的主体/大部分面积落在哪个编号格子里，就记录该编号
+3. 同一个编号格子可能包含多个房间，分别列出
+4. 房间横跨两个格子时，选面积占比更大的格子
+5. 九宫格外的区域（如有阳台延伸到格外）忽略
 
 【返回格式】严格按以下JSON返回（不要返回其他内容）：
 {
   "rooms": [
-    {"name": "主卧", "palace": "坤", "secondaryPalaces": ["兑"], "area": null},
-    {"name": "客厅", "palace": "震", "secondaryPalaces": ["巽"], "area": null},
-    {"name": "厨房", "palace": "坎", "secondaryPalaces": [], "area": null}
+    {"name": "主卧", "cell": 8},
+    {"name": "客厅", "cell": 5},
+    {"name": "厨房", "cell": 3}
   ]
 }
 
 字段说明：
-- name: 房间名称（严格按图上文字标注）
-- palace: 主宫位（坎/艮/震/巽/离/坤/兑/乾之一，不要填"中"）
-- secondaryPalaces: 次要宫位数组（房间跨多个宫位时填写，否则空数组）
-- area: 面积（图上有标注填数字，无标注填null）`
+- name: 房间名称，严格按图上文字标注
+- cell: 该房间主体所在的格子编号（1-9，中宫=5，编号在格子左上角白色标签上）`
 
   try {
     const response = await callQwenVL(compositeBase64, REANALYZE_PROMPT, DASHSCOPE_KEY)
@@ -431,13 +421,29 @@ export async function reanalyzeWithGrid(imageBase64, gridConfig, originalRooms) 
       throw new Error('AI返回格式不正确')
     }
 
-    const aiRooms = parsed.rooms.filter(r => r.name && r.palace)
-    console.log('[V2.8] AI视觉识别结果:', aiRooms.map(r =>
-      r.name + '→' + r.palace + (r.secondaryPalaces?.length ? '+' + r.secondaryPalaces.join(',') : '')
+    const aiRooms = parsed.rooms.filter(r => r.name && r.cell)
+    
+    // V2.9.10: 将AI返回的cell编号映射为宫位
+    // gridOrder是3×3数组，cell编号从1开始，按行展开
+    const gridOrder = gridConfig.gridOrder
+    const cellToPalace = {}
+    if (gridOrder && gridOrder.length === 3) {
+      let n = 1
+      for (let ri = 0; ri < 3; ri++) {
+        for (let ci = 0; ci < 3; ci++) {
+          cellToPalace[n] = gridOrder[ri][ci]
+          n++
+        }
+      }
+    }
+    
+    console.log('[V2.9.10] AI视觉识别结果:', aiRooms.map(r =>
+      `${r.name}→cell${r.cell}(${cellToPalace[r.cell] || '?'})`
     ).join(', '))
 
     // 将AI结果映射为应用需要的房间格式
     return aiRooms.map(aiRoom => {
+      const palace = cellToPalace[aiRoom.cell] || '中'
       // 尝试从原始房间列表中匹配面积和坐标
       const orig = originalRooms?.find(r =>
         r.name === aiRoom.name ||
@@ -446,8 +452,8 @@ export async function reanalyzeWithGrid(imageBase64, gridConfig, originalRooms) 
       )
       return {
         name: aiRoom.name,
-        palace: aiRoom.palace,
-        secondaryPalaces: aiRoom.secondaryPalaces || [],
+        palace,
+        secondaryPalaces: [],
         area: aiRoom.area || orig?.area || null,
         centerX: orig?.centerX || 0.5,
         centerY: orig?.centerY || 0.5,

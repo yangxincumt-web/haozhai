@@ -98,12 +98,27 @@ function getDefaultHeatValue(row, col) {
   return 0.5
 }
 
-// 8个方向按钮的布局（3x3网格，中间是说明文字）
-const DIR_BUTTONS = [
-  { dir: '西北', row: 0, col: 0 }, { dir: '北', row: 0, col: 1 }, { dir: '东北', row: 0, col: 2 },
-  { dir: '西', row: 1, col: 0 },   /* center */              { dir: '东', row: 1, col: 2 },
-  { dir: '西南', row: 2, col: 0 }, { dir: '南', row: 2, col: 1 }, { dir: '东南', row: 2, col: 2 },
-]
+// ===== V2.4.2 朝向选择：点击边框标识朝向 =====
+const SIDE_TO_DEFAULT_ANGLE = { 'top': 0, 'right': 90, 'bottom': 180, 'left': 270 }
+const SIDE_ARROW = { 'top': '↑', 'right': '→', 'bottom': '↓', 'left': '←' }
+const SIDE_HINT_TEXT = { 'top': '点击此侧为朝向', 'right': '点击此侧为朝向', 'bottom': '点击此侧为朝向', 'left': '点击此侧为朝向' }
+const SIDE_STYLES = {
+  'top': { top: 0, left: '10%', right: '10%', height: '60px', borderRadius: '16px 16px 0 0', borderBottom: 'none' },
+  'bottom': { bottom: 0, left: '10%', right: '10%', height: '60px', borderRadius: '0 0 16px 16px', borderTop: 'none' },
+  'left': { top: '10%', bottom: '10%', left: 0, width: '60px', borderRadius: '16px 0 0 16px', borderRight: 'none' },
+  'right': { top: '10%', bottom: '10%', right: 0, width: '60px', borderRadius: '0 16px 16px 0', borderLeft: 'none' },
+}
+
+// 根据点击侧边和罗盘角度，计算图片旋转偏移
+function calculateRotationOffset(clickedSide, magneticHeading) {
+  if (!clickedSide || !magneticHeading) return 0
+  const defaultAngle = SIDE_TO_DEFAULT_ANGLE[clickedSide]
+  if (defaultAngle === undefined) return 0
+  let offset = magneticHeading - defaultAngle
+  while (offset > 180) offset -= 360
+  while (offset < -180) offset += 360
+  return offset
+}
 
 export default function FloorPlanAdjuster({
   floorPlanPreview,
@@ -116,10 +131,17 @@ export default function FloorPlanAdjuster({
   const containerRef = useRef(null)
   const imgRef = useRef(null)
   
+  // V2.9.12 调试开关：合成图预览（调试完成后改为 false）
+  const DEBUG_COMPOSITE_PREVIEW = false
+
   // 状态
   const [showGrid, setShowGrid] = useState(true)
+  const [clickedSide, setClickedSide] = useState(null)
+  const [hoveredSide, setHoveredSide] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
   const [imgSize, setImgSize] = useState({ width: 0, height: 0, left: 0, top: 0 })
+  const [compositePreview, setCompositePreview] = useState(null) // 合成图预览 base64
+  const [pendingAdjustData, setPendingAdjustData] = useState(null) // 暂存待确认的调整数据
   
   // 九宫格微调参数
   const [gridOffset, setGridOffset] = useState({ x: 0, y: 0 })
@@ -129,41 +151,57 @@ export default function FloorPlanAdjuster({
   
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
   
-  // AI预检测的图片上方朝向（作为推荐值）
-  const aiTopDir = validationResult?.floorPlanInfo?.imageTopDirection || null
+  // 计算方位偏移量（罗盘角度 + 用户点击侧边 → 图片旋转偏移）
+  const imageRotationOffset = useMemo(() => {
+    return calculateRotationOffset(clickedSide, magneticHeading)
+  }, [clickedSide, magneticHeading])
   
-  // 用户选择的图片上方朝向
-  // 默认使用AI推荐值，用户可以修改
-  const [userSelectedTopDir, setUserSelectedTopDir] = useState(aiTopDir)
-  
-  // 九宫格上方朝向 = 用户选择 > AI推荐 > 默认北
-  const gridTopDirection = userSelectedTopDir || aiTopDir || '北'
+  // 九宫格上方朝向 = 从罗盘角度+点击侧边推导
+  const gridTopDirection = useMemo(() => {
+    return getDirectionName(imageRotationOffset)
+  }, [imageRotationOffset])
   
   // 九宫格布局
   const gridOrder = useMemo(() => generateGridOrder(gridTopDirection), [gridTopDirection])
   
   const rooms = validationResult?.rooms || []
   
-  // 主户型体边界：优先使用AI直接返回的边界，其次从房间坐标推算
+  // 主户型体边界：优先使用AI直接返回的边界（需验证合理性），其次从房间坐标推算，最后使用默认边界
   const floorPlanBody = useMemo(() => {
     if (!imgSize.width) return null
     
-    // 方案1：AI直接返回了主户型体边界（最新prompt会让AI返回floorPlanBody字段）
+    // 方案1：AI直接返回了主户型体边界（需验证合理性）
     const aiBody = validationResult?.floorPlanBody
     if (aiBody && aiBody.left != null && aiBody.right != null && aiBody.top != null && aiBody.bottom != null) {
-      console.log('[V2.9] 使用AI返回的主户型体边界:', aiBody)
-      return {
-        left: imgSize.left + aiBody.left * imgSize.width,
-        top: imgSize.top + aiBody.top * imgSize.height,
-        width: (aiBody.right - aiBody.left) * imgSize.width,
-        height: (aiBody.bottom - aiBody.top) * imgSize.height,
+      const aiWidth = aiBody.right - aiBody.left
+      const aiHeight = aiBody.bottom - aiBody.top
+      // 验证：AI返回的边界不能超过图片的90%（否则说明AI没正确识别主户型体）
+      if (aiWidth < 0.9 && aiHeight < 0.9) {
+        console.log('[V2.9] 使用AI返回的主户型体边界:', aiBody)
+        return {
+          left: imgSize.left + aiBody.left * imgSize.width,
+          top: imgSize.top + aiBody.top * imgSize.height,
+          width: aiWidth * imgSize.width,
+          height: aiHeight * imgSize.height,
+        }
+      } else {
+        console.log('[V2.9] AI返回的边界过大（覆盖' + Math.round(aiWidth*100) + '%x' + Math.round(aiHeight*100) + '%），判定为无效，使用默认边界')
       }
     }
     
-    // 方案2：从房间坐标推算（旧版兼容，过滤掉阳台）
+    // 方案2：从房间坐标推算（过滤掉阳台和异常房间）
     if (!rooms.length) return null
-    const mainRooms = rooms.filter(r => !r.name?.includes('阳台'))
+    
+    // 过滤：排除名称含"阳台"的房间 + 排除centerX>0.8且centerY>0.7的房间（通常是凸出阳台）
+    const mainRooms = rooms.filter(r => {
+      if (r.name?.includes('阳台')) return false
+      // 如果房间中心在右下角区域（x>0.8, y>0.7），很可能是凸出的阳台
+      if (r.centerX > 0.8 && r.centerY > 0.7) return false
+      return true
+    })
+    
     if (!mainRooms.length) return null
+    
     let minX = 1, minY = 1, maxX = 0, maxY = 0
     mainRooms.forEach(r => {
       if (!r.centerX || !r.centerY) return
@@ -182,16 +220,34 @@ export default function FloorPlanAdjuster({
     minY = Math.max(0, minY - padY)
     maxX = Math.min(1, maxX + padX)
     maxY = Math.min(1, maxY + padY)
-    return {
-      left: imgSize.left + minX * imgSize.width,
-      top: imgSize.top + minY * imgSize.height,
-      width: (maxX - minX) * imgSize.width,
-      height: (maxY - minY) * imgSize.height,
+    const calcWidth = maxX - minX
+    const calcHeight = maxY - minY
+    // 验证：推算的边界也不能超过90%
+    if (calcWidth < 0.9 && calcHeight < 0.9) {
+      console.log('[V2.9] 从房间坐标推算主户型体边界:', {minX, minY, maxX, maxY})
+      return {
+        left: imgSize.left + minX * imgSize.width,
+        top: imgSize.top + minY * imgSize.height,
+        width: calcWidth * imgSize.width,
+        height: calcHeight * imgSize.height,
+      }
     }
+    
+    return null
   }, [rooms, imgSize, validationResult?.floorPlanBody])
   
-  // 九宫格实际覆盖范围：使用主户型体边界（排除阳台），fallback到图片尺寸
-  const gridBaseRect = floorPlanBody || imgSize
+  // 九宫格实际覆盖范围：优先主户型体边界，其次默认排除右下角阳台区域，最后 fallback 到图片尺寸
+  const gridBaseRect = floorPlanBody || (() => {
+    // 默认假设主户型体占图片的左上 85% x 80% 区域（排除右下角凸出的阳台）
+    const defaultBody = {
+      left: imgSize.left + imgSize.width * 0.02,
+      top: imgSize.top + imgSize.height * 0.02,
+      width: imgSize.width * 0.83,
+      height: imgSize.height * 0.78,
+    }
+    console.log('[V2.9] 使用默认主户型体边界（排除右下角阳台区域）')
+    return defaultBody
+  })()
   
   // 计算坐向
   const { zuo, chao } = useMemo(() => {
@@ -286,19 +342,69 @@ export default function FloorPlanAdjuster({
   }, [isDragging, handleDragMove, handleDragEnd])
   
   // 重置调整
+  // 判定点击的侧边（点击户型图容器时，判断离哪边最近）
+  const handleImageClick = useCallback((e) => {
+    if (isDragging) return
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const w = rect.width
+    const h = rect.height
+    const distTop = y
+    const distBottom = h - y
+    const distLeft = x
+    const distRight = w - x
+    const minDist = Math.min(distTop, distBottom, distLeft, distRight)
+    if (minDist === distTop) setClickedSide('top')
+    else if (minDist === distBottom) setClickedSide('bottom')
+    else if (minDist === distLeft) setClickedSide('left')
+    else setClickedSide('right')
+  }, [isDragging])
+
+  // 朝向标注的位置（基于点击侧边，选择对角位置显示）
+  const getFacingLabelPosition = () => {
+    if (!clickedSide) return {}
+    const positions = {
+      'top': { bottom: '15%', right: '15%' },
+      'right': { top: '15%', left: '15%' },
+      'bottom': { top: '15%', left: '15%' },
+      'left': { top: '15%', right: '15%' },
+    }
+    return positions[clickedSide]
+  }
+
   const handleResetAdjust = () => {
     setGridOffset({ x: 0, y: 0 })
     setGridScaleX(1)
     setGridScaleY(1)
+    setClickedSide(null)
   }
   
+  // Canvas roundRect polyfill
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.arcTo(x + w, y, x + w, y + r, r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
+  ctx.lineTo(x + r, y + h)
+  ctx.arcTo(x, y + h, x, y + h - r, r)
+  ctx.lineTo(x, y + r)
+  ctx.arcTo(x, y, x + r, y, r)
+  ctx.closePath()
+}
+
   // 确认调整：截图→裁剪到九宫格范围→传给AI视觉识别房间宫位
   const handleConfirm = async () => {
     if (!onAdjustComplete) return
 
     const ib = imgSize
-    const gridOffsetPctX = ib.width > 0 ? (gridOffset.x / ib.width) * 100 : 0
-    const gridOffsetPctY = ib.height > 0 ? (gridOffset.y / ib.height) * 100 : 0
+    // V2.9.6: 偏移量百分比必须相对于九宫格自身尺寸，而非图片尺寸
+    // 因为CSS中translate(X%, Y%)的百分比是相对于元素自身宽高的
+    const gridOffsetPctX = gridBaseRect.width > 0 ? (gridOffset.x / gridBaseRect.width) * 100 : 0
+    const gridOffsetPctY = gridBaseRect.height > 0 ? (gridOffset.y / gridBaseRect.height) * 100 : 0
 
     const containerW = containerRef.current?.clientWidth || 1
     const containerH = containerRef.current?.clientHeight || 1
@@ -309,6 +415,16 @@ export default function FloorPlanAdjuster({
       height: (imgSize.height / containerH) * 100,
     }
 
+    // V2.9.9: gridBoundsPct 相对于图片实际边界（imgSize），而非容器
+    // 调整页容器是正方形（aspect-ratio:1），结果页 wrapper 是图片实际尺寸
+    // 用容器百分比会导致结果页九宫格大小/位置与用户选择的不一致
+    const gridBoundsPct = {
+      left: imgSize.width > 0 ? ((gridBaseRect.left - imgSize.left) / imgSize.width) * 100 : 0,
+      top: imgSize.height > 0 ? ((gridBaseRect.top - imgSize.top) / imgSize.height) * 100 : 0,
+      width: imgSize.width > 0 ? (gridBaseRect.width / imgSize.width) * 100 : 100,
+      height: imgSize.height > 0 ? (gridBaseRect.height / imgSize.height) * 100 : 100,
+    }
+
     const adjustmentData = {
       gridOffset,
       gridScaleX,
@@ -317,18 +433,23 @@ export default function FloorPlanAdjuster({
       gridOffsetPctX,
       gridOffsetPctY,
       gridTopDirection,
+      clickedSide,
+      imageRotationOffset,
+      magneticHeading,
       facing: getDirectionName(magneticHeading),
       zuoXiang: `${zuo}坐${chao}朝`,
       gridOrder,
       imageBounds: imgSize,
       imageBoundsPct,
+      gridBoundsPct,
     }
 
-    // V2.9: 用canvas直接绘制户型图+九宫格，彻底弃用html2canvas
-    // 九宫格画多大，截图就是多大，像素级精确
+    // V2.9.2: Canvas合成截图——精确复现屏幕上的九宫格叠加效果
+    // 核心：在container像素空间中绘制户型图+九宫格，与CSS transform完全一致
+    // V2.9.10: 重写Canvas合成——裁剪到九宫格区域，用数字编号替代中文标签
+    // 让AI只关注"房间在哪个编号格子"，数字识别比中文更可靠
     let compositeScreenshot = null
     try {
-      // 加载原始户型图到canvas
       const fpImg = new Image()
       fpImg.crossOrigin = 'anonymous'
       await new Promise((resolve, reject) => {
@@ -337,101 +458,150 @@ export default function FloorPlanAdjuster({
         fpImg.src = floorPlanPreview
       })
 
-      // 九宫格在图片坐标中的区域（归一化 0-1）
-      const gridRect = gridBaseRect === imgSize
-        ? { left: 0, top: 0, right: 1, bottom: 1 }  // 无AI边界时用整图
-        : {
-            left: (gridBaseRect.left - imgSize.left) / imgSize.width,
-            top: (gridBaseRect.top - imgSize.top) / imgSize.height,
-            right: (gridBaseRect.left - imgSize.left + gridBaseRect.width) / imgSize.width,
-            bottom: (gridBaseRect.top - imgSize.top + gridBaseRect.height) / imgSize.height,
-          }
+      const gL = gridBaseRect.left, gT = gridBaseRect.top
+      const gW = gridBaseRect.width, gH = gridBaseRect.height
+      // V2.9.13: 裁剪区域必须包含用户缩放/偏移后的实际九宫格
+      // 之前只用baseRect尺寸，用户调了宽度115%后裁剪区没跟上
+      const padding = 0
+      const SCALE = 2  // V2.9.11: 2x分辨率，让AI看清细节
 
-      // 应用用户微调（offset/scale 转为归一化偏移）
-      const gridW = gridRect.right - gridRect.left
-      const gridH = gridRect.bottom - gridRect.top
-      const offX = imgSize.width > 0 ? (gridOffset.x / imgSize.width) * gridW : 0
-      const offY = imgSize.height > 0 ? (gridOffset.y / imgSize.height) * gridH : 0
-      const adjLeft = gridRect.left + offX
-      const adjTop = gridRect.top + offY
-      const adjW = gridW * gridScaleX
-      const adjH = gridH * gridScaleY
+      // 先画全尺寸Canvas（用于绘制户型图）
+      const fullCanvas = document.createElement('canvas')
+      fullCanvas.width = containerW * SCALE
+      fullCanvas.height = containerH * SCALE
+      const fCtx = fullCanvas.getContext('2d')
+      fCtx.scale(SCALE, SCALE)
+      fCtx.fillStyle = '#ffffff'
+      fCtx.fillRect(0, 0, containerW, containerH)
+      fCtx.drawImage(fpImg, ib.left, ib.top, ib.width, ib.height)
 
-      // 输出canvas尺寸 = 九宫格覆盖的原始图片像素区域
-      const outW = Math.round(fpImg.naturalWidth * adjW)
-      const outH = Math.round(fpImg.naturalHeight * adjH)
-      const srcX = Math.round(fpImg.naturalWidth * adjLeft)
-      const srcY = Math.round(fpImg.naturalHeight * adjTop)
-      const srcW = Math.round(fpImg.naturalWidth * adjW)
-      const srcH = Math.round(fpImg.naturalHeight * adjH)
+      // V2.9.13: 计算缩放+偏移后的实际九宫格边界
+      // CSS transform: translate(gridCX+gridOffset.x, gridCY+gridOffset.y) scale(gridScaleX, gridScaleY) translate(-gridCX, -gridCY)
+      // 等价于以grid中心为锚点缩放，然后整体偏移gridOffset
+      const gridCX = gL + gW / 2
+      const gridCY = gT + gH / 2
+      const scaledW = gW * gridScaleX
+      const scaledH = gH * gridScaleY
+      // 缩放后网格的左上角（不含旋转，旋转角度通常很小或为0）
+      const scaledLeft = gridCX - scaledW / 2 + gridOffset.x
+      const scaledTop = gridCY - scaledH / 2 + gridOffset.y
+
+      // V2.9.13: 裁剪区域 = 实际九宫格边界（严格贴合，无padding）
+      const cropX = Math.max(0, scaledLeft - padding)
+      const cropY = Math.max(0, scaledTop - padding)
+      const cropW = Math.min(containerW - cropX, scaledW + padding * 2)
+      const cropH = Math.min(containerH - cropY, scaledH + padding * 2)
 
       const outCanvas = document.createElement('canvas')
-      outCanvas.width = outW
-      outCanvas.height = outH
+      outCanvas.width = cropW * SCALE
+      outCanvas.height = cropH * SCALE
       const ctx = outCanvas.getContext('2d')
+      ctx.scale(SCALE, SCALE)
 
-      // 绘制白色背景
+      // 绘制裁剪后的户型图
       ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, outW, outH)
+      ctx.fillRect(0, 0, cropW, cropH)
+      ctx.drawImage(fullCanvas, cropX * SCALE, cropY * SCALE, cropW * SCALE, cropH * SCALE, 0, 0, cropW, cropH)
 
-      // 绘制户型图裁剪区域
-      ctx.drawImage(fpImg, srcX, srcY, srcW, srcH, 0, 0, outW, outH)
+      // 九宫格在裁剪后Canvas中的坐标（用baseRect，transform会在下面应用）
+      const gridOX = gL - cropX
+      const gridOY = gT - cropY
+      // 网格中心（在outCanvas坐标系中，以baseRect为基准）
+      const baseGridCX = gridOX + gW / 2
+      const baseGridCY = gridOY + gH / 2
 
-      // 绘制九宫格（3x3网格线）
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'
-      ctx.lineWidth = 2
-      const cellW = outW / 3
-      const cellH = outH / 3
+      // V2.9.13: 应用transform（缩放以baseRect中心为锚点，再偏移）
+      ctx.save()
+      ctx.translate(baseGridCX + gridOffset.x, baseGridCY + gridOffset.y)
+      if (gridAngle) ctx.rotate(gridAngle * Math.PI / 180)
+      ctx.scale(gridScaleX, gridScaleY)
+      ctx.translate(-baseGridCX, -baseGridCY)
+
+      // V2.9.11: 网格线减淡，避免遮挡房间名称
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'
+      ctx.lineWidth = Math.max(2, gW / 150)
       for (let i = 1; i < 3; i++) {
         ctx.beginPath()
-        ctx.moveTo(i * cellW, 0)
-        ctx.lineTo(i * cellW, outH)
+        ctx.moveTo(gridOX + (gW / 3) * i, gridOY)
+        ctx.lineTo(gridOX + (gW / 3) * i, gridOY + gH)
         ctx.stroke()
         ctx.beginPath()
-        ctx.moveTo(0, i * cellH)
-        ctx.lineTo(outW, i * cellH)
+        ctx.moveTo(gridOX, gridOY + (gH / 3) * i)
+        ctx.lineTo(gridOX + gW, gridOY + (gH / 3) * i)
         ctx.stroke()
       }
 
-      // 绘制宫位标签
+      // V2.9.11: 编号标签移到格子左上角，缩小尺寸，避免遮挡房间内容
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
+      const labelSize = Math.max(12, gW / 14)
+      const cellW = gW / 3, cellH = gH / 3
+
       for (let ri = 0; ri < 3; ri++) {
         for (let ci = 0; ci < 3; ci++) {
-          const palace = gridOrder[ri][ci]
-          const cx = (ci + 0.5) * cellW
-          const cy = (ri + 0.5) * cellH
+          const num = ri * 3 + ci + 1
+          // 标签放在格子左上角
+          const lx = gridOX + ci * cellW + labelSize * 0.9
+          const ly = gridOY + ri * cellH + labelSize * 0.9
 
-          // 半透明背景色
-          const heatValue = getDefaultHeatValue(ri, ci)
-          const bgColor = getPalaceColor(heatValue)
-          ctx.fillStyle = bgColor
-          ctx.fillRect(ci * cellW + 2, ri * cellH + 2, cellW - 4, cellH - 4)
+          ctx.save()
+          ctx.translate(lx, ly)
+          if (gridAngle) ctx.rotate(-gridAngle * Math.PI / 180)
 
-          // 宫位名称
-          ctx.fillStyle = palace === '中' ? '#999' : '#333'
-          ctx.font = `bold ${Math.max(14, outW / 18)}px sans-serif`
-          ctx.fillText(palace, cx, cy - outW / 30)
+          // 白色圆角背景
+          const bgW = labelSize * 1.2, bgH = labelSize * 1.1
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
+          ctx.lineWidth = 1
+          roundRect(ctx, -bgW / 2, -bgH / 2, bgW, bgH, 4)
+          ctx.fill()
+          ctx.stroke()
 
-          // 方位
-          if (palace !== '中') {
-            ctx.font = `${Math.max(11, outW / 25)}px sans-serif`
-            ctx.fillStyle = '#666'
-            ctx.fillText(TRIGRAMS[palace], cx, cy + outW / 30)
-          }
+          // 编号
+          ctx.fillStyle = '#000'
+          ctx.font = `bold ${labelSize}px sans-serif`
+          ctx.fillText(String(num), 0, 0)
+
+          ctx.restore()
         }
       }
+      ctx.restore()
 
-      compositeScreenshot = outCanvas.toDataURL('image/png', 0.9)
-      console.log('[V2.9] Canvas合成完成:', outW, 'x', outH)
+      compositeScreenshot = outCanvas.toDataURL('image/png', 0.95)
+      console.log('[V2.9.13] Canvas合成完成(无padding):', cropW * SCALE, 'x', cropH * SCALE,
+        '(2x), grid:', gW.toFixed(0), 'x', gH.toFixed(0), 'crop==grid:', cropW === gW && cropH === gH, 'gridAngle:', gridAngle)
     } catch (err) {
-      console.warn('[V2.9] Canvas合成失败:', err)
+      console.warn('[V2.9.11] Canvas合成失败:', err)
     }
 
-    onAdjustComplete({
+    const finalData = {
       ...adjustmentData,
-      croppedScreenshot: compositeScreenshot, // canvas合成的截图，九宫格画多大就是多大
-    })
+      croppedScreenshot: compositeScreenshot,
+    }
+
+    // V2.9.12: 调试模式——先预览合成图，确认后再发给AI
+    console.log('[V2.9.12] DEBUG_COMPOSITE_PREVIEW:', DEBUG_COMPOSITE_PREVIEW, 'compositeScreenshot:', !!compositeScreenshot, 'size:', compositeScreenshot ? compositeScreenshot.length : 0)
+    if (DEBUG_COMPOSITE_PREVIEW) {
+      setPendingAdjustData(finalData)
+      setCompositePreview(compositeScreenshot || '__ERROR__')
+      return
+    }
+
+    onAdjustComplete(finalData)
+  }
+
+  // V2.9.12: 预览确认后继续
+  const handlePreviewConfirm = () => {
+    if (pendingAdjustData && onAdjustComplete) {
+      onAdjustComplete(pendingAdjustData)
+    }
+    setCompositePreview(null)
+    setPendingAdjustData(null)
+  }
+
+  const handlePreviewCancel = () => {
+    setCompositePreview(null)
+    setPendingAdjustData(null)
   }
 
   return (
@@ -448,45 +618,19 @@ export default function FloorPlanAdjuster({
         </div>
       </div>
       
-      {/* ===== 方向选择器 ===== */}
-      <div className="dir-selector-section" style={{ marginBottom: '12px' }}>
-        <div className="dir-selector-label">
-          <span>📐 图片上方代表什么方向？</span>
-          {aiTopDir && (
-            <span className="ai-suggestion-tag">
-              AI推荐: {aiTopDir}方
-            </span>
-          )}
+      {/* 引导提示（点击前显示） */}
+      {!clickedSide && (
+        <div className="direction-guide">
+          <span className="guide-icon">🏠</span>
+          <span className="guide-text">请点击户型图中阳台或大窗户所在的一侧</span>
         </div>
-        <div style={{ fontSize: '12px', color: '#888', marginTop: '4px', marginBottom: '8px' }}>
-          💡 看图中的指北针（N箭头），N指向哪边就是北。如果N指向上方就选"北"，指向右方就选"西"（因为图片上方就是西）
-        </div>
-        <div className="dir-picker-grid">
-          {DIR_BUTTONS.map(({ dir, row, col }) => {
-            const isSelected = gridTopDirection === dir
-            const isAiSuggestion = aiTopDir === dir
-            return (
-              <button
-                key={dir}
-                className={`dir-pick-btn ${isSelected ? 'active' : ''} ${isAiSuggestion && !isSelected ? 'ai-suggested' : ''}`}
-                onClick={() => setUserSelectedTopDir(dir)}
-              >
-                {dir}
-                {isAiSuggestion && <span className="ai-dot">✦</span>}
-              </button>
-            )
-          })}
-          {/* 中心说明 */}
-          <div className="dir-picker-center">
-            <span>↑ 图片上方</span>
-          </div>
-        </div>
-      </div>
+      )}
       
       {/* ===== 户型图预览区域 ===== */}
       <div 
         ref={containerRef}
         className={`adjuster-container ${isDragging ? 'dragging' : ''}`}
+        onClick={handleImageClick}
       >
         {/* 户型图 */}
         <div className="floorplan-wrapper">
@@ -499,8 +643,43 @@ export default function FloorPlanAdjuster({
           />
         </div>
         
+        {/* 校准前：侧边高亮提示 */}
+        {!clickedSide && (
+          <>
+            {['top', 'right', 'bottom', 'left'].map(side => (
+              <div 
+                key={side}
+                className={`side-highlight ${side} ${hoveredSide === side ? 'hovered' : ''}`}
+                style={SIDE_STYLES[side]}
+                onMouseEnter={() => setHoveredSide(side)}
+                onMouseLeave={() => setHoveredSide(null)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setClickedSide(side)
+                }}
+              >
+                {hoveredSide === side && (
+                  <span className="side-tooltip">{SIDE_HINT_TEXT[side]}</span>
+                )}
+              </div>
+            ))}
+            <div className="side-center-hint">
+              <span className="hint-icon">👆</span>
+              <span className="hint-text">点击边框标识朝向</span>
+            </div>
+          </>
+        )}
+        
+        {/* 校准后：朝向标注 */}
+        {clickedSide && (
+          <div className="facing-label" style={getFacingLabelPosition()}>
+            <span className="facing-label-arrow">{SIDE_ARROW[clickedSide]}</span>
+            <span className="facing-label-text">朝向面</span>
+          </div>
+        )}
+        
         {/* 九宫格叠加层 - 基于户型图实际位置定位 */}
-        {showGrid && imgSize.width > 0 && (
+        {showGrid && clickedSide && imgSize.width > 0 && (
           <div 
             className={`nine-grid-overlay aligned ${isDragging ? 'dragging' : ''}`}
             style={{
@@ -549,13 +728,13 @@ export default function FloorPlanAdjuster({
         )}
       </div>
       
-      {/* 当前方向提示 */}
-      <div className="adjuster-hint success">
-        <span>📐 图片上方 = <strong>{gridTopDirection}方</strong>（{TRIGRAMS[gridOrder[0][0]]}宫在左上）</span>
-        <button className="btn-reclick" onClick={() => setUserSelectedTopDir(null)}>
-          重置方向
-        </button>
-      </div>
+      {/* 校准提示 */}
+      {clickedSide && (
+        <div className="adjuster-hint success">
+          <span>✅ 朝向已校准：图片上方 = <strong>{gridTopDirection}方</strong>（{TRIGRAMS[gridOrder[0][0]]}宫在左上）</span>
+          <button className="btn-reclick" onClick={() => setClickedSide(null)}>重新选择</button>
+        </div>
+      )}
       
       {/* 微调控制面板 */}
       <div className="adjust-controls">
@@ -667,6 +846,40 @@ export default function FloorPlanAdjuster({
         </div>
       )}
       
+      {/* V2.9.12 调试：合成图预览模态框 */}
+      {compositePreview && (
+        <div className="composite-preview-overlay" onClick={handlePreviewCancel}>
+          <div className="composite-preview-modal" onClick={e => e.stopPropagation()}>
+            <div className="composite-preview-header">
+              <h3>🔍 九宫格合成图预览</h3>
+              <span className="composite-preview-hint">
+                这是即将发给AI识别的图片，请确认：1) 网格线对齐 2) 编号标签清晰 3) 户型图完整
+              </span>
+            </div>
+            <div className="composite-preview-body">
+              {compositePreview === '__ERROR__' ? (
+                <div className="composite-preview-error">
+                  <p>⚠️ Canvas 合成失败</p>
+                  <p>请打开浏览器控制台查看错误日志，或尝试重新调整九宫格后重试</p>
+                </div>
+              ) : (
+                <img src={compositePreview} alt="九宫格合成图预览" />
+              )}
+            </div>
+            <div className="composite-preview-actions">
+              <button className="btn-secondary" onClick={handlePreviewCancel}>
+                返回调整
+              </button>
+              {compositePreview !== '__ERROR__' && (
+                <button className="btn-primary btn-glow" onClick={handlePreviewConfirm}>
+                  确认无误，继续分析 →
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 确认按钮 */}
       <div className="adjuster-actions">
         <button className="btn-secondary" onClick={onReset}>
