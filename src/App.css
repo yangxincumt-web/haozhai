@@ -648,6 +648,200 @@
 .palace-cell.ji .palace-score { color: var(--ji-color); }
 .palace-cell.xiong .palace-score { color: var(--xiong-color); }
 
+.palace-cell.expanded {
+  background: rgba(166, 124, 61, 0.06);
+  box-shadow: inset 0 0 0 1px var(--copper-gold);
+}
+
+.palace-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+/* ===== 解读面板 ===== */
+.palace-interpretation-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.interp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.interp-nature {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.interp-nature.ji {
+  background: rgba(76, 175, 80, 0.12);
+  color: var(--ji-color);
+}
+
+.interp-nature.xiong {
+  background: rgba(244, 67, 54, 0.12);
+  color: var(--xiong-color);
+}
+
+.interp-title {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.interp-room {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.interp-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.interp-close:hover {
+  background: rgba(0,0,0,0.05);
+}
+
+.interp-section {
+  margin-bottom: 12px;
+}
+
+.interp-section:last-child {
+  margin-bottom: 0;
+}
+
+.interp-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--copper-gold);
+  margin-bottom: 6px;
+}
+
+.interp-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  margin: 0 0 6px 0;
+}
+
+.interp-room-advice {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  margin: 0 0 8px 0;
+  padding: 6px 10px;
+  background: rgba(166, 124, 61, 0.04);
+  border-radius: 6px;
+}
+
+.interp-tips {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.interp-tip-label {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.interp-tip-items {
+  color: var(--jade-dark);
+  font-weight: 500;
+}
+
+.interp-avoid {
+  font-size: 12px;
+  color: var(--xiong-color);
+  margin-top: 4px;
+}
+
+.interp-star {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.star-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.star-badge.mountain {
+  background: rgba(33, 150, 243, 0.1);
+  color: #1976d2;
+}
+
+.star-badge.facing {
+  background: rgba(156, 39, 176, 0.1);
+  color: #7b1fa2;
+}
+
+.star-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.star-nature {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.star-nature.ji {
+  background: rgba(76, 175, 80, 0.1);
+  color: var(--ji-color);
+}
+
+.star-nature.xiong {
+  background: rgba(244, 67, 54, 0.1);
+  color: var(--xiong-color);
+}
+
+.interp-combo {
+  font-size: 13px;
+  color: var(--copper-gold);
+  font-weight: 500;
+  margin: 6px 0 0 0;
+  padding: 6px 10px;
+  background: rgba(166, 124, 61, 0.06);
+  border-radius: 6px;
+  border-left: 3px solid var(--copper-gold);
+}
+
 /* ===== 化解方案 ===== */
 .huajie-section {
   margin-top: 12px;

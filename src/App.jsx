@@ -259,12 +259,14 @@ export default function App() {
         buildYear: buildYear ? parseInt(buildYear) : undefined,
       })
 
+      // V3.0: roomLayout用于解读增强，在if外声明
+      const roomLayout = {}
+
       // 融合形煞+装修+环境优势+户型图，重新计算综合评分
       if (envData || renovationData || envAdvantageData || floorPlanData) {
         // V2.8: 优先使用AI视觉识别的palace字段，完全不用数学映射
         const adjustedData = floorPlanData?.adjustedData
         const rooms = floorPlanData?.validation?.rooms || floorPlanData?.rooms || []
-        const roomLayout = {}
         
         // 检查是否有直接palace字段（V2.8: AI视觉识别生成的）
         const hasDirectPalace = rooms.some(r => r.palace && r.palace !== '中')
@@ -335,6 +337,9 @@ export default function App() {
         )
         analysisResult.overall = recalculated
       }
+
+      // V3.0: 保存roomLayout用于解读增强
+      analysisResult.roomLayout = roomLayout
 
       setResult(analysisResult)
       setStep(STEPS.RESULT)
@@ -846,7 +851,7 @@ export default function App() {
                 </div>
 
                 {/* 八宫方位图 */}
-                <PalaceGrid palaces={result.palaces} />
+                <PalaceGrid palaces={result.palaces} feiXing={result.feiXing} roomLayout={result.roomLayout} />
 
                 {/* 关键发现 - 精简总结 */}
                 <div className="summary-card">
